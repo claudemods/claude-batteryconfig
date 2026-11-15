@@ -31,6 +31,32 @@ write_val() { printf '%s' "$2" > "$1" 2>/dev/null; }
 is_int() { [[ ${1:-} =~ ^[0-9]{1,3}$ ]]; }
 writable() { [[ -e $1 ]] && (( 8#$(stat -c %a "$1") & 8#200 )); }
 
+# service control that works on systemd and OpenRC (Alpine, some Gentoo)
+svc() { # start | stop | active | failed
+    if [[ -d /run/systemd/system ]]; then
+        case $1 in
+            active) systemctl is-active "$SERVICE" 2>/dev/null ;;
+            failed) systemctl is-failed --quiet "$SERVICE" ;;
+            *)      systemctl "$1" "$SERVICE" >/dev/null 2>&1 ;;
+        esac
+    elif command -v rc-service >/dev/null 2>&1; then
+        case $1 in
+            active) rc-service claude-batteryconfig status >/dev/null 2>&1 && echo active || echo inactive ;;
+            failed) rc-service claude-batteryconfig status 2>&1 | grep -qi crashed ;;
+            *)      rc-service claude-batteryconfig "$1" >/dev/null 2>&1 ;;
+        esac
+    else
+        [[ $1 == active ]] && echo inactive
+        return 1
+    fi
+}
+
+# under OpenRC the service must stay running, so idle after a one-shot apply
+finish() { # exit-code
+    if [[ ! -d /run/systemd/system ]] && (( $1 == 0 )); then exec sleep infinity; fi
+    exit "$1"
+}
+
 detect() {
     BAT=""; BACKEND=""; TFILE=""
     local d f
@@ -171,7 +197,7 @@ cmd_status() {
             fi ;;
     esac
     if read_conf && needs_loop "$CS" "$CE"; then
-        echo "daemon=$(systemctl is-active "$SERVICE" 2>/dev/null)"
+        echo "daemon=$(svc active)"
     fi
     [[ -f $CONF ]] && echo "persisted=1" || echo "persisted=0"
 }
@@ -200,28 +226,46 @@ apply_const() { # end   (no loop needed)
     esac
 }
 
-enforce() { # charge|hold
+PHASE_FILE=/var/lib/claude-batteryconfig/phase
+
+# charge: let the battery fill up to END.  hold: do not charge at all (battery discharges).
+enforce() { # charge|hold  capacity
     case $BACKEND in
         type) if [[ $1 == charge ]]; then type_is_long && set_type std
               else type_is_long || set_type long; fi ;;
-        end)  local want; [[ $1 == charge ]] && want=$CE || want=$CS
-              [[ $(rd "$BAT/charge_control_end_threshold") == "$want" ]] \
-                  || write_val "$BAT/charge_control_end_threshold" "$want" ;;
+        end)
+            local ef=$BAT/charge_control_end_threshold want f cap=${2:-100}
+            if [[ $1 == charge ]]; then want=$CE; else want=$CS; fi
+            [[ $(rd "$ef") == "$want" ]] && return 0
+            write_val "$ef" "$want"
+            if [[ $1 == hold && $(rd "$ef") != "$want" ]]; then
+                # firmware refused a very low stop value: use the lowest it accepts below the current level
+                for f in 15 20 25 30 40 50 60 70; do
+                    (( f > want && f < cap )) || continue
+                    write_val "$ef" "$f"; [[ $(rd "$ef") == "$f" ]] && break
+                done
+            fi ;;
     esac
 }
 
+save_phase() { mkdir -p "${PHASE_FILE%/*}" && printf '%s' "$1" > "$PHASE_FILE"; }
+
 run_loop() {
-    local cs=$CS phase="" cap st
+    local cs=$CS phase prev cap
     [[ $BACKEND == type ]] && (( cs < LONGMIN )) && cs=$LONGMIN
+    phase=$(rd "$PHASE_FILE")
+    [[ $phase == charge || $phase == hold ]] || phase=""
     while :; do
-        cap=$(rd "$BAT/capacity"); st=$(rd "$BAT/status"); cap=${cap:-0}
+        cap=$(rd "$BAT/capacity"); cap=${cap:-0}
+        # first start: never charge between START and END, only below START
         if [[ -z $phase ]]; then
-            if (( cap < cs )) || { (( cap < CE )) && [[ $st == Charging ]]; }; then
-                phase=charge; else phase=hold; fi
+            if (( cap < cs )); then phase=charge; else phase=hold; fi
         fi
-        (( cap < cs )) && phase=charge
-        (( cap >= CE )) && phase=hold
-        enforce "$phase"
+        prev=$phase
+        (( cap < cs )) && phase=charge     # fell below START: start a charge cycle
+        (( cap >= CE )) && phase=hold      # reached END: stop and let it discharge again
+        [[ $phase == "$prev" && -e $PHASE_FILE ]] || save_phase "$phase"
+        enforce "$phase" "$cap"
         sleep "$POLL"
     done
 }
@@ -244,14 +288,15 @@ cmd_set() {
         return 0
     fi
 
-    systemctl stop "$SERVICE" >/dev/null 2>&1
+    svc stop
+    rm -f "$PHASE_FILE"      # new settings start a fresh cycle
     needs_loop "$s" "$e" && mode=persist     # the loop needs the saved config
     if [[ $mode == persist ]]; then
         printf 'START=%d\nEND=%d\n' "$s" "$e" > "$CONF" && chmod 644 "$CONF"
-        systemctl start "$SERVICE" >/dev/null 2>&1 || { echo "Could not start $SERVICE" >&2; return 1; }
+        svc start || { echo "Could not start $SERVICE" >&2; return 1; }
         sleep 1.5
-        if systemctl is-failed --quiet "$SERVICE"; then
-            echo "Service failed; see: journalctl -u $SERVICE" >&2; return 1
+        if svc failed; then
+            echo "Service failed; see: journalctl -u $SERVICE (systemd) or /var/log/messages (OpenRC)" >&2; return 1
         fi
     else
         rm -f "$CONF"
@@ -260,11 +305,12 @@ cmd_set() {
 }
 
 cmd_daemon() {
-    read_conf || exit 0
+    [[ -e /proc/acpi/call ]] || modprobe acpi_call >/dev/null 2>&1
+    read_conf || finish 0
     detect || { kernel_hint >&2; exit 1; }
     case $BACKEND in
-        native) apply_native "$CS" "$CE"; exit $? ;;
-        *) needs_loop "$CS" "$CE" || { apply_const "$CE"; exit $?; } ;;
+        native) apply_native "$CS" "$CE"; finish $? ;;
+        *) needs_loop "$CS" "$CE" || { apply_const "$CE"; finish $?; } ;;
     esac
     run_loop
 }

@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 claudemods
+# OpenRC service for systems without systemd (Alpine, Gentoo with OpenRC)
+
+description="Battery charge thresholds (claude-batteryconfig)"
+command="/usr/local/bin/claude-batteryconfig-helper"
+command_args="daemon"
+command_background=true
+pidfile="/run/claude-batteryconfig.pid"
+
+depend() {
+    need localmount
+    after modules
+}
