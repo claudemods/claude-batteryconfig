@@ -7,6 +7,6 @@ sudo rm -f /usr/local/bin/claude-batteryconfig-helper \
     /usr/share/polkit-1/actions/org.claudemods.batteryconfig.policy \
     /etc/systemd/system/claude-batteryconfig.service \
     /etc/polkit-1/rules.d/49-claude-batteryconfig.rules \
-    /etc/claude-batteryconfig.conf
+    /etc/claude-batteryconfig.conf /etc/modules-load.d/claude-batteryconfig.conf
 sudo systemctl daemon-reload
 echo "Removed. Thresholds already written to the firmware stay until reboot/reset."

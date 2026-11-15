@@ -23,6 +23,22 @@ polkit.addRule(function(action, subject) {
 EOF
 fi
 
+echo "==> Checking Legion Go S firmware access"
+if sudo claude-batteryconfig-helper diag 2>/dev/null | grep -q 'legion go s: yes' \
+   && ! ls /sys/class/power_supply/*/charge_control_end_threshold >/dev/null 2>&1; then
+    if [[ ! -e /proc/acpi/call ]]; then
+        echo "Legion Go S has no kernel charge-limit interface; the widget needs the acpi_call module."
+        if command -v pacman >/dev/null; then
+            read -r -p "Install acpi_call-dkms with pacman now? [y/N] " ans
+            if [[ ${ans,,} == y ]]; then
+                sudo pacman -S --needed acpi_call-dkms || echo "pacman failed; install acpi_call manually."
+            fi
+        fi
+        sudo modprobe acpi_call 2>/dev/null || echo "acpi_call not loadable yet (kernel headers may be missing, or reboot)."
+    fi
+    echo acpi_call | sudo tee /etc/modules-load.d/claude-batteryconfig.conf >/dev/null
+fi
+
 echo "==> Installing icon"
 install -Dm644 "$here/plasmoid/contents/icons/claude-batteryconfig.svg" \
     "$HOME/.local/share/icons/hicolor/scalable/apps/claude-batteryconfig.svg"

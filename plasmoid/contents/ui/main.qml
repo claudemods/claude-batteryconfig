@@ -37,8 +37,13 @@ PlasmoidItem {
 
     property bool startEmulated: false
     property bool daemonActive: true
-    // emulated start threshold lives in a background service, so it must be saved
-    readonly property bool effectivePersist: persist || (startEmulated && pendingStart > 0)
+    property string backend: "native"
+    property int minEnd: 0
+    // does this combination need the background service? then it must be saved
+    readonly property bool needsLoop: backend === "end" ? pendingStart > 0
+        : backend === "type" ? !(pendingEnd <= 80 || (pendingEnd >= 100 && pendingStart === 0))
+        : false
+    readonly property bool effectivePersist: persist || needsLoop
 
     readonly property bool dirty: available
         && (pendingEnd !== curEnd || (startSupported && pendingStart !== curStart))
@@ -124,6 +129,8 @@ PlasmoidItem {
         curEnd = parseInt(kv["end"]) || 100
         persisted = kv["persisted"] === "1"
         startEmulated = kv["start_mode"] === "emulated"
+        backend = kv["backend"] || "native"
+        minEnd = parseInt(kv["min_end"]) || 0
         daemonActive = (kv["daemon"] || "active") === "active"
         if (!wasDirty) {
             pendingStart = curStart
@@ -132,8 +139,8 @@ PlasmoidItem {
     }
 
     function setPreset(s, e) {
-        pendingEnd = e
-        pendingStart = startSupported ? s : curStart
+        pendingEnd = Math.max(e, minEnd)
+        pendingStart = Math.min(s, pendingEnd - 1)
     }
 
     Timer {
@@ -212,7 +219,8 @@ PlasmoidItem {
 
             Kirigami.InlineMessage {
                 Layout.fillWidth: true
-                visible: root.available && root.startEmulated && root.curStart > 0 && !root.daemonActive
+                visible: root.available && root.startEmulated && !root.daemonActive
+                    && root.persisted && root.needsLoop
                 type: Kirigami.MessageType.Warning
                 text: "The background service is not running, so the start threshold is not enforced. "
                     + "Run: sudo systemctl enable --now claude-batteryconfig.service"
@@ -299,7 +307,9 @@ PlasmoidItem {
                 visible: root.available
                 enabled: root.startSupported && !root.busy
                 title: "Start charging below"
-                subtitle: root.startEmulated
+                subtitle: root.backend === "type"
+                    ? "Legion Go S: firmware can only hold charge above 80%, so values below 80 act as 80."
+                    : root.startEmulated
                     ? "Emulated by a background service (this firmware only offers a stop limit)."
                     : "Charger stays idle until the battery drops under this level."
                 from: 0
@@ -314,18 +324,44 @@ PlasmoidItem {
                 enabled: !root.busy
                 title: "Stop charging at"
                 subtitle: "Charging halts when the battery reaches this level."
-                from: Math.min(100, Math.max(root.endMin, root.pendingStart + 1))
+                from: Math.min(100, Math.max(root.endMin, root.minEnd, root.pendingStart + 1))
                 to: 100
                 value: root.pendingEnd
                 onEdited: function (v) {
-                    root.pendingEnd = Math.min(100, Math.max(v, root.pendingStart + 1, root.endMin))
+                    root.pendingEnd = Math.min(100, Math.max(v, root.pendingStart + 1, root.endMin, root.minEnd))
                 }
             }
 
             // presets
             Flow {
                 Layout.fillWidth: true
-                visible: root.available
+                visible: root.available && root.backend === "type"
+                spacing: Kirigami.Units.smallSpacing
+                PlasmaComponents.Button {
+                    text: "Firmware cap 80"
+                    enabled: !root.busy
+                    onClicked: root.setPreset(0, 80)
+                }
+                PlasmaComponents.Button {
+                    text: "Balanced 80–90"
+                    enabled: !root.busy
+                    onClicked: root.setPreset(80, 90)
+                }
+                PlasmaComponents.Button {
+                    text: "Near full 90–95"
+                    enabled: !root.busy
+                    onClicked: root.setPreset(90, 95)
+                }
+                PlasmaComponents.Button {
+                    text: "No limit"
+                    enabled: !root.busy
+                    onClicked: root.setPreset(0, 100)
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                visible: root.available && root.backend !== "type"
                 spacing: Kirigami.Units.smallSpacing
                 PlasmaComponents.Button {
                     text: "Longevity 40–60"
@@ -352,7 +388,7 @@ PlasmoidItem {
             QQC2.CheckBox {
                 visible: root.available
                 text: "Keep after reboot and resume"
-                enabled: !(root.startEmulated && root.pendingStart > 0)
+                enabled: !root.needsLoop
                 checked: root.effectivePersist
                 onToggled: root.persist = checked
             }
