@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Id": "org.claudemods.batteryconfig",
+        "Name": "claude-batteryconfig",
+        "Description": "Set battery charge start and stop thresholds (Legion Go S / CachyOS)",
+        "Icon": "claude-batteryconfig",
+        "Version": "1.0",
+        "Category": "System Information",
+        "License": "GPL-3.0-or-later",
+        "Authors": [
+            {
+                "Name": "claudemods"
+            }
+        ]
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

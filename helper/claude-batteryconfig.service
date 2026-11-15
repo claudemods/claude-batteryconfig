@@ -1,0 +1,10 @@
+[Unit]
+Description=Battery charge thresholds (claude-batteryconfig)
+After=multi-user.target suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/claude-batteryconfig-helper daemon
+
+[Install]
+WantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target

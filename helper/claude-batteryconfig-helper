@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# claude-batteryconfig helper v1.0 (Legion Go S aware)
+#   status                              print battery + threshold info (no root needed)
+#   set START END [persist|nopersist]   write thresholds (root)
+#   daemon | restore                    apply saved thresholds; emulate START if firmware lacks it (root, systemd)
+#   diag                                print diagnostics for bug reports
+#
+# Backends:
+#   native   kernel exposes charge_control_start_threshold + charge_control_end_threshold
+#   emulated kernel only exposes charge_control_end_threshold (typical for Legion Go S via
+#            lenovo-wmi-other). START is enforced by a small loop that lowers the stop limit
+#            to START while idle and raises it to END once the battery drops below START.
+set -u
+
+CONF=/etc/claude-batteryconfig.conf
+PS=/sys/class/power_supply
+SERVICE=claude-batteryconfig.service
+POLL=20
+
+find_bat() {
+    local d
+    for d in "$PS"/*; do
+        [[ -r $d/type && $(<"$d/type") == Battery ]] || continue
+        [[ -r $d/scope && $(<"$d/scope") == Device ]] && continue
+        if [[ -e $d/charge_control_end_threshold ]]; then echo "$d"; return 0; fi
+    done
+    for d in "$PS"/*; do
+        [[ -r $d/type && $(<"$d/type") == Battery ]] || continue
+        [[ -r $d/scope && $(<"$d/scope") == Device ]] && continue
+        echo "$d"; return 0
+    done
+    return 1
+}
+
+rd() { [[ -r $1 ]] && cat "$1" 2>/dev/null; }
+write_val() { printf '%s' "$2" > "$1" 2>/dev/null; }
+is_int() { [[ ${1:-} =~ ^[0-9]{1,3}$ ]]; }
+
+# sets CS / CE from the config file; returns 1 if missing or invalid
+read_conf() {
+    CS=""; CE=""
+    [[ -f $CONF ]] || return 1
+    local k v
+    while IFS='=' read -r k v; do   # parsed, never sourced
+        [[ $k == START ]] && CS=$v
+        [[ $k == END ]] && CE=$v
+    done < "$CONF"
+    is_int "$CS" && is_int "$CE" || return 1
+    CS=$((10#$CS)); CE=$((10#$CE))
+}
+
+kernel_hint() {
+    echo "Kernel $(uname -r) exposes no charge_control_end_threshold. The Legion Go S needs a kernel with Lenovo WMI battery charge limiting (lenovo-wmi-other)."
+}
+
+cmd_status() {
+    local bat
+    if ! bat=$(find_bat); then
+        echo "available=0"; echo "problem=No battery found in $PS. $(kernel_hint)"; return 0
+    fi
+    if [[ ! -e $bat/charge_control_end_threshold ]]; then
+        echo "available=0"
+        echo "problem=$(kernel_hint)"
+        return 0
+    fi
+    echo "available=1"
+    echo "battery=$(basename "$bat")"
+    echo "capacity=$(rd "$bat/capacity")"
+    echo "state=$(rd "$bat/status")"
+    echo "start_supported=1"
+    if [[ -e $bat/charge_control_start_threshold ]]; then
+        echo "start_mode=native"
+        echo "start=$(rd "$bat/charge_control_start_threshold")"
+        echo "end=$(rd "$bat/charge_control_end_threshold")"
+    else
+        echo "start_mode=emulated"
+        if read_conf && (( CS > 0 )); then
+            echo "start=$CS"; echo "end=$CE"
+            echo "daemon=$(systemctl is-active "$SERVICE" 2>/dev/null)"
+        else
+            echo "start=0"; echo "end=$(rd "$bat/charge_control_end_threshold")"
+        fi
+    fi
+    [[ -f $CONF ]] && echo "persisted=1" || echo "persisted=0"
+}
+
+apply_end() { # end
+    local bat ef
+    bat=$(find_bat) || { echo "No battery found" >&2; return 1; }
+    ef=$bat/charge_control_end_threshold
+    [[ -e $ef ]] || { echo "Kernel does not expose a charge stop threshold" >&2; return 1; }
+    write_val "$ef" "$1"
+    [[ $(rd "$ef") == "$1" ]] || { echo "Firmware rejected stop value $1 (now $(rd "$ef"))" >&2; return 1; }
+}
+
+apply_native() { # start end
+    local s=$1 e=$2 bat sf ef ce
+    bat=$(find_bat) || { echo "No battery found" >&2; return 1; }
+    sf=$bat/charge_control_start_threshold; ef=$bat/charge_control_end_threshold
+    ce=$(rd "$ef")
+    # keep start < end at every intermediate step
+    if (( s > ce )); then
+        write_val "$ef" "$e"; write_val "$sf" "$s"
+    else
+        write_val "$sf" "$s"; write_val "$ef" "$e"
+    fi
+    [[ $(rd "$sf") == "$s" && $(rd "$ef") == "$e" ]] || {
+        echo "Firmware rejected ${s}/${e} (now $(rd "$sf")/$(rd "$ef"))" >&2; return 1; }
+}
+
+cmd_set() {
+    local s=${1:-} e=${2:-} mode=${3:-persist} bat
+    [[ $EUID -eq 0 ]] || { echo "Must run as root" >&2; return 1; }
+    is_int "$s" && is_int "$e" || { echo "Invalid numbers" >&2; return 1; }
+    s=$((10#$s)); e=$((10#$e))
+    (( s >= 0 && e <= 100 && s < e )) || { echo "Need 0 <= start < end <= 100" >&2; return 1; }
+    bat=$(find_bat) && [[ -e $bat/charge_control_end_threshold ]] \
+        || { echo "$(kernel_hint)" >&2; return 1; }
+
+    if [[ -e $bat/charge_control_start_threshold ]]; then
+        apply_native "$s" "$e" || return 1
+    elif (( s > 0 )); then
+        mode=persist    # emulation needs the config + service
+    else
+        apply_end "$e" || return 1
+    fi
+
+    if [[ $mode == persist ]]; then
+        printf 'START=%d\nEND=%d\n' "$s" "$e" > "$CONF" && chmod 644 "$CONF"
+    else
+        rm -f "$CONF"
+    fi
+
+    if [[ ! -e $bat/charge_control_start_threshold ]]; then
+        # (re)start service: runs the emulation loop, or just re-applies and exits
+        systemctl restart "$SERVICE" >/dev/null 2>&1 || { echo "Could not start $SERVICE" >&2; return 1; }
+        if (( s > 0 )); then
+            sleep 1.5
+            local cur; cur=$(rd "$bat/charge_control_end_threshold")
+            [[ $cur == "$s" || $cur == "$e" ]] || {
+                echo "Firmware rejected emulated thresholds (stop limit is $cur)" >&2; return 1; }
+        fi
+    fi
+}
+
+cmd_daemon() {
+    read_conf || exit 0
+    local bat; bat=$(find_bat) || { echo "No battery" >&2; exit 1; }
+    local ef=$bat/charge_control_end_threshold
+    [[ -e $ef ]] || { kernel_hint >&2; exit 1; }
+
+    if [[ -e $bat/charge_control_start_threshold ]]; then
+        apply_native "$CS" "$CE"; exit $?
+    elif (( CS == 0 )); then
+        apply_end "$CE"; exit $?
+    fi
+
+    # emulated start threshold
+    local phase="" cap st want
+    while :; do
+        cap=$(rd "$bat/capacity"); st=$(rd "$bat/status")
+        cap=${cap:-0}
+        if [[ -z $phase ]]; then
+            if (( cap < CS )) || { (( cap < CE )) && [[ $st == Charging ]]; }; then
+                phase=charge; else phase=hold; fi
+        fi
+        (( cap < CS )) && phase=charge
+        (( cap >= CE )) && phase=hold
+        [[ $phase == charge ]] && want=$CE || want=$CS
+        [[ $(rd "$ef") == "$want" ]] || write_val "$ef" "$want"
+        sleep "$POLL"
+    done
+}
+
+cmd_diag() {
+    echo "kernel: $(uname -r)"
+    echo "product: $(rd /sys/class/dmi/id/product_name) / $(rd /sys/class/dmi/id/product_version)"
+    echo "--- power_supply"
+    for d in "$PS"/*; do echo "$(basename "$d"): type=$(rd "$d/type") scope=$(rd "$d/scope")"; done
+    echo "--- charge_control files"
+    ls "$PS"/*/charge_control_* 2>&1
+    echo "--- lenovo modules"
+    lsmod 2>/dev/null | grep -Ei 'lenovo|ideapad|legion' || echo "(none loaded)"
+    echo "--- firmware-attributes"
+    ls /sys/class/firmware-attributes 2>&1
+}
+
+case ${1:-} in
+    status)         cmd_status ;;
+    set)            shift; cmd_set "$@" ;;
+    daemon|restore) cmd_daemon ;;
+    diag)           cmd_diag ;;
+    *) echo "usage: $0 status | set START END [persist|nopersist] | daemon | diag" >&2; exit 2 ;;
+esac

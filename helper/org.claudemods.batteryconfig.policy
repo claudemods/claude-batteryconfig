@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>claudemods</vendor>
+  <action id="org.claudemods.batteryconfig.set">
+    <description>Change battery charge thresholds</description>
+    <message>Authentication is required to change the battery charge start/stop thresholds</message>
+    <icon_name>claude-batteryconfig</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/claude-batteryconfig-helper</annotate>
+  </action>
+</policyconfig>
