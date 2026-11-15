@@ -63,15 +63,16 @@
   <circle cx="333" cy="354" r="9" fill="#eff0f1" stroke="#3daee9" stroke-width="2"/>
 
   <!-- presets -->
+  <text x="24" y="379" fill="#eff0f1" font-size="10" opacity="0.65">PRESETS · resume below → stop at</text>
   <g font-size="12" fill="#eff0f1" text-anchor="middle">
-    <rect x="24" y="384" width="124" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
-    <text x="86" y="403">Longevity 40–60</text>
-    <rect x="156" y="384" width="116" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
-    <text x="214" y="403">Balanced 70–80</text>
-    <rect x="280" y="384" width="112" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
-    <text x="336" y="403">Travel 95–100</text>
-    <rect x="24" y="422" width="84" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
-    <text x="66" y="441">No limit</text>
+    <rect x="24" y="388" width="124" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
+    <text x="86" y="407">Lifespan 30→80</text>
+    <rect x="156" y="388" width="116" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
+    <text x="214" y="407">Daily 20→90</text>
+    <rect x="280" y="388" width="112" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
+    <text x="336" y="407">Full 20→100</text>
+    <rect x="24" y="426" width="84" height="30" rx="5" fill="#31363b" stroke="#5a5f63"/>
+    <text x="66" y="445">No limit</text>
   </g>
 
   <!-- persist checkbox -->

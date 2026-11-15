@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 claudemods
 # claude-batteryconfig v1.0 installer (run as your normal user; sudo is used where needed)
 #   ./install.sh                 install / upgrade
 #   ./install.sh --passwordless  also let the 'wheel' group apply without a password prompt

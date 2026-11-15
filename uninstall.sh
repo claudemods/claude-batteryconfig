@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 claudemods
 set -u
 kpackagetool6 -t Plasma/Applet -r org.claudemods.batteryconfig 2>/dev/null
 rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/claude-batteryconfig.svg"

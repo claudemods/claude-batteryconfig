@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 claudemods
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
@@ -313,9 +315,14 @@ PlasmoidItem {
                     ? "Emulated by a background service (this firmware only offers a stop limit)."
                     : "Charger stays idle until the battery drops under this level."
                 from: 0
-                to: Math.max(0, root.pendingEnd - 1)
+                to: 99
                 value: root.pendingStart
-                onEdited: function (v) { root.pendingStart = Math.max(0, Math.min(v, root.pendingEnd - 1)) }
+                onEdited: function (v) {
+                    root.pendingStart = Math.max(0, Math.min(v, 99))
+                    // raising start past stop drags stop up with it
+                    if (root.pendingEnd <= root.pendingStart)
+                        root.pendingEnd = root.pendingStart + 1
+                }
             }
 
             ThresholdRow {
@@ -324,59 +331,43 @@ PlasmoidItem {
                 enabled: !root.busy
                 title: "Stop charging at"
                 subtitle: "Charging halts when the battery reaches this level."
-                from: Math.min(100, Math.max(root.endMin, root.minEnd, root.pendingStart + 1))
+                from: Math.max(root.endMin, root.minEnd)
                 to: 100
                 value: root.pendingEnd
                 onEdited: function (v) {
-                    root.pendingEnd = Math.min(100, Math.max(v, root.pendingStart + 1, root.endMin, root.minEnd))
+                    root.pendingEnd = Math.min(100, Math.max(v, root.endMin, root.minEnd))
+                    // lowering stop below start drags start down with it
+                    if (root.pendingStart >= root.pendingEnd)
+                        root.pendingStart = root.pendingEnd - 1
                 }
             }
 
             // presets
-            Flow {
-                Layout.fillWidth: true
-                visible: root.available && root.backend === "type"
-                spacing: Kirigami.Units.smallSpacing
-                PlasmaComponents.Button {
-                    text: "Firmware cap 80"
-                    enabled: !root.busy
-                    onClicked: root.setPreset(0, 80)
-                }
-                PlasmaComponents.Button {
-                    text: "Balanced 80–90"
-                    enabled: !root.busy
-                    onClicked: root.setPreset(80, 90)
-                }
-                PlasmaComponents.Button {
-                    text: "Near full 90–95"
-                    enabled: !root.busy
-                    onClicked: root.setPreset(90, 95)
-                }
-                PlasmaComponents.Button {
-                    text: "No limit"
-                    enabled: !root.busy
-                    onClicked: root.setPreset(0, 100)
-                }
+            PlasmaComponents.Label {
+                visible: root.available
+                text: "PRESETS · resume below → stop at"
+                opacity: 0.65
+                font: Kirigami.Theme.smallFont
             }
 
             Flow {
                 Layout.fillWidth: true
-                visible: root.available && root.backend !== "type"
+                visible: root.available
                 spacing: Kirigami.Units.smallSpacing
                 PlasmaComponents.Button {
-                    text: "Longevity 40–60"
+                    text: "Lifespan 30→80"
                     enabled: !root.busy
-                    onClicked: root.setPreset(40, 60)
+                    onClicked: root.setPreset(30, 80)
                 }
                 PlasmaComponents.Button {
-                    text: "Balanced 70–80"
+                    text: "Daily 20→90"
                     enabled: !root.busy
-                    onClicked: root.setPreset(70, 80)
+                    onClicked: root.setPreset(20, 90)
                 }
                 PlasmaComponents.Button {
-                    text: "Travel 95–100"
+                    text: "Full 20→100"
                     enabled: !root.busy
-                    onClicked: root.setPreset(95, 100)
+                    onClicked: root.setPreset(20, 100)
                 }
                 PlasmaComponents.Button {
                     text: "No limit"

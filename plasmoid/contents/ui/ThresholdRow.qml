@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 claudemods
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2

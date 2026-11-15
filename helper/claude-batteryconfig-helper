@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 claudemods
 # claude-batteryconfig helper v1.0 (Legion Go S aware)
 #   status                              print battery + threshold info (no root needed)
 #   set START END [persist|nopersist]   write thresholds (root)

@@ -5,7 +5,7 @@ the battery **starts charging** and when it **stops charging**.
 
 - Sliders and editable number boxes for both thresholds
 - Live battery bar showing the charge window
-- Presets: Longevity 40-60, Balanced 70-80, Travel 95-100, No limit
+- Presets shown as "resume below → stop at": Lifespan 30→80, Daily 20→90, Full 20→100, No limit
 - Optional "keep after reboot and resume"
 - Admin rights are requested only when you press **Apply** (polkit prompt)
 
