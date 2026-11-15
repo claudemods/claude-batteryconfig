@@ -9,6 +9,10 @@ the battery **starts charging** and when it **stops charging**.
 - Optional "keep after reboot and resume"
 - Admin rights are requested only when you press **Apply** (polkit prompt)
 
+<p align="center">
+  <img src="docs/screenshot.svg" alt="claude-batteryconfig popup showing the battery bar, start and stop sliders, presets and Apply button" width="360">
+</p>
+
 ## Requirements
 
 - KDE Plasma 6 (default on CachyOS KDE), `kpackagetool6`, `polkit`, `systemd`
@@ -114,3 +118,9 @@ plasmoid/      widget (metadata.json, contents/ui, contents/icons)
 helper/        root helper, polkit policy, systemd unit
 install.sh  uninstall.sh
 ```
+
+## License
+
+claude-batteryconfig is free software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).
+It comes with ABSOLUTELY NO WARRANTY. It writes to battery firmware controls, so use it at your own risk.
