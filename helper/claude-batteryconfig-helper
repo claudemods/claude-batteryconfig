@@ -160,11 +160,31 @@ status_long() {
     if [[ -n $TFILE ]]; then type_is_long; else [[ $(rd "$ACPI_STATE") == long ]]; fi
 }
 
+# ---- forced discharge: lets the battery really drain between END and START while plugged in
+# kernel charge_behaviour with force-discharge, or the Lenovo firmware feature 0x03020000
+# (WMAE 0x12: value 0 = force discharge, 1 = auto). The firmware cannot read this state back.
+kern_discharge() {
+    local f=$BAT/charge_behaviour
+    [[ -n $BAT ]] && writable "$f" && grep -q 'force-discharge' "$f" 2>/dev/null
+}
+can_discharge() { kern_discharge || { [[ -e /proc/acpi/call ]] && is_gos; }; }
+set_discharge() { # on|off
+    if kern_discharge; then
+        [[ $1 == on ]] && write_val "$BAT/charge_behaviour" force-discharge || write_val "$BAT/charge_behaviour" auto
+        return
+    fi
+    [[ -e /proc/acpi/call ]] || return 1
+    local v=1 r; [[ $1 == on ]] && v=0
+    printf '%s\n' '\_SB.GZFD.WMAE 0 0x12 b00000203'"0$v"'000000' > /proc/acpi/call 2>/dev/null || return 1
+    r=$(cat /proc/acpi/call 2>/dev/null); [[ $r != Error* ]]
+}
+
 # does this START/END need the background loop?
 needs_loop() { # start end
     case $BACKEND in
         end)  (( $1 > 0 )) ;;
-        type) ! { (( $2 <= LONGMIN )) || { (( $2 >= 100 )) && (( $1 == 0 )); }; } ;;
+        type) if can_discharge; then ! { (( $2 >= 100 )) && (( $1 == 0 )); }
+              else ! { (( $2 <= LONGMIN )) || { (( $2 >= 100 )) && (( $1 == 0 )); }; }; fi ;;
         *)    return 1 ;;
     esac
 }
@@ -231,8 +251,14 @@ PHASE_FILE=/var/lib/claude-batteryconfig/phase
 # charge: let the battery fill up to END.  hold: do not charge at all (battery discharges).
 enforce() { # charge|hold  capacity
     case $BACKEND in
-        type) if [[ $1 == charge ]]; then type_is_long && set_type std
-              else type_is_long || set_type long; fi ;;
+        type) if [[ $1 == charge ]]; then
+                  set_discharge off
+                  type_is_long && set_type std
+              else
+                  type_is_long || set_type long
+                  # the firmware alone re-charges as soon as it drops below 80%: force discharge
+                  can_discharge && set_discharge on
+              fi ;;
         end)
             local ef=$BAT/charge_control_end_threshold want f cap=${2:-100}
             if [[ $1 == charge ]]; then want=$CE; else want=$CS; fi
@@ -252,9 +278,10 @@ save_phase() { mkdir -p "${PHASE_FILE%/*}" && printf '%s' "$1" > "$PHASE_FILE"; 
 
 run_loop() {
     local cs=$CS phase prev cap
-    [[ $BACKEND == type ]] && (( cs < LONGMIN )) && cs=$LONGMIN
+    [[ $BACKEND == type ]] && ! can_discharge && (( cs < LONGMIN )) && cs=$LONGMIN
     phase=$(rd "$PHASE_FILE")
     [[ $phase == charge || $phase == hold ]] || phase=""
+    trap 'set_discharge off; exit 0' TERM INT
     while :; do
         cap=$(rd "$BAT/capacity"); cap=${cap:-0}
         # first start: never charge between START and END, only below START
@@ -289,6 +316,7 @@ cmd_set() {
     fi
 
     svc stop
+    [[ $BACKEND == type ]] && can_discharge && set_discharge off
     rm -f "$PHASE_FILE"      # new settings start a fresh cycle
     needs_loop "$s" "$e" && mode=persist     # the loop needs the saved config
     if [[ $mode == persist ]]; then
